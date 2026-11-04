@@ -1,67 +1,91 @@
-# E-Commerce & Services Platform — Case Study
+# E-Commerce & Services Platform
 
-> **Public case study of a private project.** The source code is private; this repository documents the architecture and engineering decisions. **Live demo:** https://vendaprodutosonline.vercel.app
+**A Next.js and TypeScript platform that brings physical-product sales and bookable services into one storefront and operations back office.** It connects catalog browsing, checkout, payments, shipping, scheduling and customer management, with AI assistance inside selected workflows.
 
-A production-ready commerce platform that sells **physical products and bookable services** in one storefront, with payments, shipping, a CRM, role-based dashboards and AI-assisted features.
+**[Open the live demo](https://vendaprodutosonline.vercel.app)** · [Architecture](#documented-architecture) · [Trade-offs](#architecture-trade-offs) · [Suggested walkthrough](#suggested-walkthrough)
 
-## Overview
+> **Public case study; private application source.** This repository explains the product scope and architecture. It does not contain a runnable application or a public test suite. A guided source-code walkthrough is available on request.
 
-The platform combines a customer-facing storefront (catalog, daily deals, cart, checkout, service scheduling) with an operations back office (orders, customers/CRM, catalog management, analytics). It is built as a single **Next.js (App Router)** application with a typed data layer, real payment and shipping integrations, and an AI assistant.
+## The problem and the product
 
-- **Type:** full-stack e-commerce + service-scheduling SaaS
-- **Live demo:** https://vendaprodutosonline.vercel.app
-- **Status:** private source — available for review on request
+A business selling both products and services needs to coordinate two different journeys: a product purchase may require shipping, while a service purchase needs scheduling. The platform brings those journeys together with customer, order and catalog management for the operating team.
 
-## Architecture
+| User          | Main workflows                                                                              |
+| ------------- | ------------------------------------------------------------------------------------------- |
+| Customer      | Browse products/services, find daily deals, manage a cart, check out and schedule services. |
+| Staff         | Work with the operational areas exposed to their role.                                      |
+| Administrator | Manage catalog, customers/CRM, orders and analytics through the back office.                |
+
+## Documented architecture
+
+The application is organized as a single **Next.js App Router** project. React storefront and back-office views use domain-oriented route handlers, a typed Prisma data layer and PostgreSQL. Payment, shipping, storage and AI providers sit behind the backend integration boundary.
 
 ```mermaid
 flowchart TD
-    User["Storefront (React 19 / Next.js App Router)"] --> API["Next.js Route Handlers (40+ REST endpoints)"]
-    Admin["Back office / role dashboards"] --> API
-    API --> Auth["NextAuth v5 (RBAC: customer / staff / admin)"]
-    API --> DB[("PostgreSQL (Supabase) via Prisma 7")]
-    API --> Cache["Rate limiting + caching"]
-    API --> AI["Google Gemini (chat, product copy, analytics)"]
-    API --> Storage["Cloudflare R2 (media)"]
-    PaymentGW["MercadoPago / Pix (AbacatePay)"] -->|HMAC-signed webhooks| API
-    API --> Shipping["Melhor Envio (rates & labels)"]
-    API --> SEO["SSG / SSR / ISR rendering"]
+    Customer[Customer storefront] --> App[Next.js App Router / React / TypeScript]
+    Team[Role-based back office] --> App
+    App --> API[Next.js route handlers]
+    API --> Auth[NextAuth authentication and role checks]
+    API --> DB[(PostgreSQL / Supabase via Prisma)]
+    API --> Storage[Cloudflare R2 media]
+    API --> Shipping[Melhor Envio shipping]
+    API --> AI[Google Gemini]
+    API --> Payment[MercadoPago / AbacatePay]
+    Payment -->|Payment webhooks| API
 ```
 
-## Key features
+The backend comprises **40+ REST endpoints** across catalog, cart, orders, payments, scheduling, CRM and analytics.
 
-- **Catalog** of products and services with categories, search and daily deals (time-limited offers).
-- **Checkout** with multiple payment methods: credit card and **Pix**, via **MercadoPago** and **AbacatePay**.
-- **Shipping** quotes and labels through **Melhor Envio**.
-- **Service scheduling** flow alongside product sales.
-- **CRM** and **role-based dashboards** (different views for customers, staff and admins).
-- **AI assistant** (Google Gemini) for customer chat, product description generation and analytics summaries.
-- **SEO**: static, server and incremental rendering (SSG/SSR/ISR) per route.
+## Capabilities and integration boundaries
 
-## Tech stack
+| Area                   | Documented implementation                                                             | Engineering consideration                                                                                                                 |
+| ---------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Commerce               | Product/service catalog, categories, search, cart and time-limited deals.             | Prices, availability and offer windows must remain consistent through checkout.                                                           |
+| Payments               | Credit-card and Pix flows using MercadoPago and AbacatePay; HMAC-verified webhooks.   | Verify authenticity before changing order state. Signature validation alone does not establish replay protection or exactly-once updates. |
+| Fulfillment            | Shipping quotes and labels through Melhor Envio; a service-scheduling flow.           | Shipping and scheduling have different data and failure cases.                                                                            |
+| Operations             | CRM, order/catalog management, analytics and customer/staff/admin roles.              | Backend authorization must protect resources independently of which dashboard is visible.                                                 |
+| AI assistance          | Gemini-powered customer chat, product-description generation and analytics summaries. | Provider latency, cost and generated-content quality need explicit handling.                                                              |
+| Delivery and discovery | Vercel hosting; SSG, SSR and ISR selected by route.                                   | Cache freshness and rendering cost vary by page and data sensitivity.                                                                     |
 
-| Layer | Technologies |
-|---|---|
-| Frontend | Next.js (App Router), React 19, TypeScript (strict), Tailwind CSS |
-| Backend | Next.js Route Handlers (REST), NextAuth v5 |
-| Database | PostgreSQL (Supabase) + Prisma 7 |
-| Payments | MercadoPago, Pix via AbacatePay (HMAC-verified webhooks) |
-| Shipping | Melhor Envio |
-| Storage | Cloudflare R2 |
-| AI | Google Gemini (chat, content, analytics) |
-| Testing | Vitest |
-| Hosting | Vercel |
+## Architecture trade-offs
 
-## Engineering highlights
+The following trade-offs follow from the documented architecture and provide a starting point for a technical discussion.
 
-- **40+ REST endpoints** organized by domain (catalog, cart, orders, payments, scheduling, CRM, analytics).
-- **Payment webhooks verified with HMAC signatures** to guarantee authenticity before mutating orders.
-- **Role-based access control (RBAC)** across customer, staff and admin areas.
-- **Rate limiting** on sensitive endpoints.
-- **Composite database indexes** and **offset + cursor pagination** for fast, scalable listings.
-- **AI integration** wired into real workflows (support chat, catalog copy, dashboard insights) rather than as a gimmick.
-- **SEO-aware rendering** strategy chosen per route (SSG/SSR/ISR).
+| Choice                                         | Why it fits this product                                                                                              | Trade-off and when to reconsider                                                                                                                                       |
+| ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **One Next.js application for UI and backend** | Keeps storefront, back-office and API changes in one TypeScript project and deployment.                               | Domains share a release and runtime boundary. Independent services become more useful if ownership, scaling or release needs diverge.                                  |
+| **PostgreSQL with Prisma**                     | Relational data suits customers, orders, catalog records and scheduling; generated types support application changes. | ORM convenience does not replace query-plan, transaction or migration review. Complex reporting and contention may need explicit SQL or more targeted data access.     |
+| **Products and services in one platform**      | Reuses identity, checkout and operational tooling across both offerings.                                              | Shipping, availability and appointment rules cannot be treated as identical. Domain boundaries matter as the product grows.                                            |
+| **External payment and shipping providers**    | Uses established services for payment methods, Pix, rates and labels.                                                 | Provider failures, webhook timing, reconciliation and sandbox/live configuration add integration work. Critical order state must remain controlled by the application. |
+| **SSG/SSR/ISR selected by route**              | Allows catalog/discovery pages and personalized views to use different rendering strategies.                          | Caching adds invalidation and freshness decisions; private or frequently changing data requires special care.                                                          |
+| **Offset and cursor pagination**               | Supports different listing/navigation patterns; composite indexes target common queries.                              | Offset cost can grow on deep pages, while cursor navigation needs stable ordering and a suitable index. Choose per access pattern and verify with measurements.        |
+| **AI inside existing workflows**               | Makes chat, catalog copy and analytics assistance available where users work.                                         | Adds external latency, cost and output uncertainty. AI output should not become an unvalidated source of payment or order truth.                                       |
 
-## Notes
+## Suggested walkthrough
 
-This repository intentionally contains **no source code** — it is a public summary of a private commercial project, created so recruiters can evaluate the architecture and scope. A guided code walkthrough is available on request.
+1. **Storefront:** inspect the catalog, a product/service detail page and the cart to understand the two customer journeys.
+2. **Checkout and fulfillment:** review how shipping and scheduling enter the flow. Use an explicitly configured sandbox for any transaction demonstration.
+3. **Back office:** request a guided view of role boundaries, order handling and CRM rather than assuming administrative access is public.
+4. **Source discussion:** trace a checkout request, a payment webhook and a protected administration endpoint through validation, persistence and error handling.
+5. **Trade-off discussion:** explain why a single application and relational model fit the present scope, and identify the evidence that would justify changing them.
+
+## Technology stack
+
+| Layer                | Technologies                                                    |
+| -------------------- | --------------------------------------------------------------- |
+| Frontend             | Next.js App Router, React 19, TypeScript strict, Tailwind CSS   |
+| Backend and identity | Next.js route handlers, NextAuth v5, customer/staff/admin roles |
+| Data                 | PostgreSQL on Supabase, Prisma 7                                |
+| Payments             | MercadoPago; Pix through AbacatePay                             |
+| Shipping and media   | Melhor Envio; Cloudflare R2                                     |
+| AI                   | Google Gemini                                                   |
+| Testing              | Vitest in the private application                               |
+| Hosting              | Vercel                                                          |
+
+## Validation and review scope
+
+The private project documents rate limiting, composite database indexes, offset/cursor pagination, role-based access control and payment-webhook signature verification. This repository provides the architecture summary and [live demo](https://vendaprodutosonline.vercel.app). Application source, reproducible test results and production performance measurements are outside the public review scope; no comparison benchmark or production-scale guarantee is asserted here.
+
+For a deeper technical review, the most useful evidence is a guided code-and-test walkthrough of payment state transitions, duplicate/out-of-order webhooks, server-side role checks, booking conflicts and provider failures. These are review priorities rather than published test results. The trade-off analysis explains architectural implications; it does not establish that alternatives were implemented or benchmarked.
+
+Local installation instructions and test commands are supplied with authorized access to the private application. For an initial review, use the live demo and the walkthrough above.
